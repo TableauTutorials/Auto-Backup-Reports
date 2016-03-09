@@ -1,0 +1,105 @@
+<h4>The Dilemma</h4>
+Your Tableau Server instance has a backup policy in place (please say yes) but you also want to ensure your most valuable Tableau Server workbooks are always somewhere safe and secure. What’s more, you’ll have <b>version control</b>!
+<h4>The Catch</h4>
+It should all be automatic. No living soul should ever touch this process (except when it needs some upgrades and further improvements). And in keeping with the spirit of ‘utility’, it should be small, fast, and functional.
+<h4>The High-Level Steps</h4>
+You’ll need a PostgreSQL script to grab workbook names for export with <a href="http://onlinehelp.tableausoftware.com/current/server/en-us/tabcmd_cmd.htm">tabcmd get</a><b><i>. </i></b>You’ll use this query inside your PowerShell script (file: <a href="https://github.com/MikeRobertsPS/TsHacks">TsGetWorkbookDownloadURL</a>) which leverages the outputted csv for workbook names.
+
+[code]SELECT
+w.id as "WorkbookId"
+, w.name
+, w.workbook_url
+, 'https://&lt;your server here&gt;/workbooks/'||w.workbook_url||'.twbx' as "WbDownloadLink"
+, w.created_at
+, w.updated_at
+, w.owner_id
+, w.project_id
+, w.size
+, w.view_count
+, w.owner_name
+, w.project_name
+, w.system_user_id
+, w.site_id
+FROM _workbooks w
+where w.site_id = 1 -- certified
+[/code]
+
+&nbsp;
+
+We start with the Tableau workbooks. We know where they are and what they’re called; we just need to execute the query to feed our PowerShell script to actually download each of them (file: <a href="https://github.com/MikeRobertsPS/TsHacks">TsGetWBURLs</a>). It’s set for the default site but one could easily adjust this to pull workbooks from any Tableau Server site.
+
+&nbsp;
+
+Once we’ve got that settled, let’s shift over to PowerShell. You’ll use that list to export each workbook from Tableau Server into your desired file path. After that’s complete, we’ll move on to Git in order to push the workbooks to our repository.
+
+[code]
+
+Set-StrictMode -Version Latest
+# login info as tabcmd doesn't take credential object
+$credentials = New-Object System.Management.Automation.PSCredential -ArgumentList "&lt;your username&gt;", (Get-Content C:\&lt;your file path&gt;\TsInfoss.txt | ConvertTo-SecureString)
+
+# get the workbooks from server
+# some setup stuff; clearing the screen, etc
+
+Set-Location C:\TsAdmin\PsOutput\CertifiedTsWorkbooks
+Get-ChildItem -Filter *.twb* | rm
+
+## clearing old sessions
+tabcmd logout
+
+## can also use password file for tabcmd
+tabcmd login -s https://&lt;your server&gt; -u $credentials.UserName -p $credentials.GetNetworkCredential().Password --no-certcheck 2&gt;&gt; c:\TabCmd\TabCmdLoginErr.txt
+Start-Sleep -Seconds 3
+
+# getting each workbook
+ForEach ( $wb in @(Import-Csv -Path C:\TsAdmin\PsOutput\TsWorkbookList.csv | select -expand WbDownloadLink) ) {
+Try
+{
+tabcmd get $wb --no-certcheck 2&gt;&gt; c:\TabCmd\TabCmdGetWbErr.txt
+}
+Catch
+{
+Write-Error -Message "Error occured: $_"
+}
+}
+# cleanup and logout
+tabcmd logout 2&gt;&gt; C:\TabCmd\TabCmdLogoutErr.txt
+
+$credentials = $null #removing credentials
+
+## Get-ChildItem | ForEach-Object { Rename-Item -Path $_ -NewName "$($_.BaseName+"_"+(Get-Date -f yyyy-MM-dd)+$_.Extension)" }
+## putting this here and not in Finally block to avoid being connected too long to Tableau server
+git add . ;git commit -m 'Ts Cert Wbs';git push origin master
+Start-Sleep -Seconds 600
+
+Set-Location $HOME
+
+[/code]
+
+Now, before we sync with Github, we’ll need to do some minor setup/configuration:
+<ul>
+	<li>Ensure Github is installed. For Windows, I used a package installer, <a href="https://chocolatey.org/packages?q=git">Chocolatey</a>. This will make the install easier and future upgrades just as easy. Always remember your <a href="http://blogs.msdn.com/b/powershell/archive/2013/12/16/powershell-security-best-practices.aspx">security</a>. Trust your source. Don’t be silly about what you install as there’s just tons of garbage out there.</li>
+	<li>Get your SSH key for Github and your <b>private</b> repository in which you’ll send these Tableau Workbooks. <a href="https://help.github.com/articles/generating-ssh-keys">https://help.github.com/articles/generating-ssh-keys</a></li>
+	<li>Configure Git for your account: <a href="https://help.github.com/articles/setting-your-username-in-git">https://help.github.com/articles/setting-your-username-in-git</a></li>
+	<li>Add your remote Git repository: <a href="https://help.github.com/articles/adding-a-remote">https://help.github.com/articles/adding-a-remote</a></li>
+	<li>Configure the PowerShell Tableau module so you can leverage the script (file: <a href="https://github.com/MikeRobertsPS/TsHacks">TsGetExtract</a>) and install in the location listed on the attached image (see below). Note: The typical location is: C:\Users\&lt;username&gt;\Documents\WindowsPowerShell\Modules</li>
+</ul>
+<a href="http://42.pluralsight.com/wp-content/uploads/2014/08/Screen-Shot-2014-07-18-at-8.42.30-PM.png"><img class="alignnone wp-image-93" src="http://42.pluralsight.com/wp-content/uploads/2014/08/Screen-Shot-2014-07-18-at-8.42.30-PM.png" alt="Screen Shot 2014-07-18 at 8.42.30 PM" width="500" height="199" /></a>
+
+<a href="http://42.pluralsight.com/wp-content/uploads/2014/08/Screen-Shot-2014-07-18-at-8.42.41-PM.png"><img class="alignnone wp-image-94" src="http://42.pluralsight.com/wp-content/uploads/2014/08/Screen-Shot-2014-07-18-at-8.42.41-PM.png" alt="Screen Shot 2014-07-18 at 8.42.41 PM" width="500" height="275" /></a>
+
+Finally, the fun part. Run the script &nbsp;(file: <a href="https://github.com/MikeRobertsPS/TsHacks">TsGetWbs</a>) &nbsp;that pulls it all together and <a href="http://technet.microsoft.com/en-us/library/jj649816.aspx">schedule</a> it to run as often as you need (daily is probably best).
+
+&nbsp;
+
+Essentially, the flow will look like this: Postgres → PowerShell(w/Tableau Server) → Github.
+
+<a href="http://42.pluralsight.com/wp-content/uploads/2014/08/Screen-Shot-2014-08-05-at-11.11.49-AM.png"><img class="alignnone wp-image-96" src="http://42.pluralsight.com/wp-content/uploads/2014/08/Screen-Shot-2014-08-05-at-11.11.49-AM.png" alt="Screen Shot 2014-08-05 at 11.11.49 AM" width="500" height="387" /></a>
+
+That’s it! Now you can select any of the workbooks to see any version back to the day you started with the script.
+
+&nbsp;
+
+Enjoy!
+
+-Mike

@@ -1,0 +1,17 @@
+SELECT 
+  w.id as "WorkbookId"
+, w.name
+, w.workbook_url
+, 'https://<your server here>/workbooks/'||w.workbook_url||'.twbx' as "WbDownloadLink"
+, w.created_at
+, w.updated_at
+, w.owner_id
+, w.project_id
+, w.size
+, w.view_count
+, w.owner_name
+, w.project_name
+, w.system_user_id
+, w.site_id
+FROM _workbooks w
+where w.site_id = 1 -- certified

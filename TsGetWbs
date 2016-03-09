@@ -1,0 +1,43 @@
+Set-StrictMode -Version Latest
+
+
+# login info as tabcmd doesn't take credential object
+$credentials = New-Object System.Management.Automation.PSCredential -ArgumentList "<username>", (Get-Content C:\TsAdmin\PsOutput\<your_text_file.txt> | ConvertTo-SecureString)
+
+# get the workbooks from server
+# some setup stuff; clearing the screen, etc
+
+Set-Location C:\TsAdmin\PsOutput\CertifiedTsWorkbooks
+Get-ChildItem -Filter *.twb* | rm # remove old stuff
+
+## clearing old sessions
+tabcmd logout
+
+## can also use password file for tabcmd
+tabcmd login -s https://<your_server> -u $credentials.UserName -p $credentials.GetNetworkCredential().Password --no-certcheck 2>> c:\TabCmd\TabCmdLoginErr.txt
+Start-Sleep -Seconds 3
+
+# getting each workbook
+ForEach ( $wb in @(Import-Csv -Path C:\TsAdmin\PsOutput\TsWorkbookList.csv | select -expand WbDownloadLink)) {
+    Try
+     {
+        tabcmd get $wb --no-certcheck
+      }
+    Catch 
+     {
+        $_.Exception | select * | Out-File c:\TabCmd\TabCmdGetWbErr.txt
+     }
+}
+# cleanup and logout
+tabcmd logout 2>> C:\TabCmd\TabCmdLogoutErr.txt
+
+$credentials = $null #removing credentials
+
+## Get-ChildItem | ForEach-Object { Rename-Item -Path $_ -NewName "$($_.BaseName+"_"+(Get-Date -f yyyy-MM-dd)+$_.Extension)" }
+## putting this here and not in Finally block to avoid being connected too long to Tableau server
+
+
+git add . ;git commit -m 'Ts Cert Wbs';git push origin master
+Start-Sleep -Seconds 600
+
+Set-Location $HOME
